@@ -28,7 +28,7 @@ pthread_cond_t cond1 = PTHREAD_COND_INITIALIZER;
 
 struct args_t
 {
-    int endindex;
+	int endindex;
 };
 
 //Read in input from the argument file into an array of integer pointers
@@ -60,22 +60,31 @@ void* calculateprefixsum(void* args)
 {
 	struct args_t* structcopy = (struct args_t*) args;
 	int endindexcopy = (structcopy)->endindex;
-	int checkvalue = 0;
-
+ 
 	if(endindexcopy >= 0 && endindexcopy <= (n-1))
 	{
-		for(int i = 0; i < log2(n); i++)
-		{
-			input[endindexcopy] = inputpreviouslevelcopy[endindexcopy] + inputpreviouslevelcopy[(int) (endindexcopy - (pow(2.0, i)))];
-			//checkvalue = input[endindexcopy];
-			//printf("%d", endindexcopy);
-			//printf("%d", checkvalue);
+   printf("log2(n): %f\n", log2(n));
+    	for(int i = 0; i <= log2(n); i++)
+    	{
+ 
+   	int dummy = 0;
+  	 
+        	input[endindexcopy] = inputpreviouslevelcopy[endindexcopy] + inputpreviouslevelcopy[(int) (endindexcopy - (pow(2.0, i)))];
+	 
+input[0] = 1; //testing
+printf("i: %d\n", i); fflush(stdout);
 
-			for(int j = 0; j < n; j++)
-			{
-				inputpreviouslevelcopy[j] = input[j];
-			}
-		}
+        	for(int k = 0; k < n; k++){
+       	 
+        	dummy = dummy + input[k];
+        	printf("dummy %d, input[%d]: %d\n", dummy,k,input[k]);fflush(stdout);
+       	input[k] = dummy;
+        	}
+     	 
+       	 
+    	 
+    	}
+     	 
 	}
 
 	pthread_mutex_lock(&lock);
@@ -83,12 +92,12 @@ void* calculateprefixsum(void* args)
 
 	if(threadcounter < maxnumthreads)
 	{
-		pthread_cond_wait(&cond1, &lock);
+    	pthread_cond_wait(&cond1, &lock);
 	}
 	else if(threadcounter == maxnumthreads)
 	{
-		threadcounter = 0;
-		pthread_cond_broadcast(&cond1);
+    	threadcounter = 0;
+    	pthread_cond_broadcast(&cond1);
 	}
 
 	pthread_mutex_unlock(&lock);
@@ -120,6 +129,9 @@ int main(int argc, char* argv[])
   	n = atoi(argv[2]); //size of the input vector = number of lines in the file
   	//Getting a seg fault right above
   	numthreads = atoi(argv[3]); //Third argument specifies number of threads to use for computing the solution
+ 	 
+  	printf("n: %d, numthreads: %d\n", n, numthreads);
+ 	 
   }
   else
   {
@@ -152,30 +164,31 @@ int main(int argc, char* argv[])
   //Initialize condition variables:
   if(pthread_cond_init(&cond1, NULL) != 0)
   {
-      perror("pthread_cond_init() error");
-      exit(1);
+  	perror("pthread_cond_init() error");fflush(stdout);
+  	exit(1);
   }
 
   //Create each thread using a loop:
+  printf("Create Threads\n");fflush(stdout);
   for(int x = 0; x < numthreads; x++)
   {
 	struct args_t *args = malloc(sizeof(struct args_t));
 	args->endindex = endindex;
-
  	int result = pthread_create(&threadlist[x], NULL, calculateprefixsum, (void*) args); //pthread_create only takes a (void*) argument for arguments to the calculateprefixsum function.
 
  	if(result != 0)
  	{
- 		printf("\nThread cannot be created : [%s]", strerror(result));
+     	printf("\nThread cannot be created : [%s]", strerror(result));
  	}
 
  	free(args);
  	endindex+=1;
   }
-
+printf("Finished creation\n");fflush(stdout);
   //Join each thread to allow the main function to continue execution once all threads are finished with their individual executions of the critical section.
   for(int y = 0; y < numthreads; y++)
   {
+  printf("Thread %d: %ld\n", y ,threadlist[y]); fflush(stdout);
   	pthread_join(threadlist[y], NULL); //Join does not affect the deadlock
   }
 
@@ -188,12 +201,15 @@ int main(int argc, char* argv[])
   //Destroy the condition variable
   if(pthread_cond_destroy(&cond1) != 0)
   {
-      perror("pthread_cond_destroy() error");
-      exit(2);
+  	perror("pthread_cond_destroy() error");
+  	exit(2);
   }
 
   free(inputpreviouslevelcopy);
   free(input);
   return EXIT_SUCCESS;
 }
+
+
+
 
