@@ -19,28 +19,15 @@ int *inputpreviouslevelcopy;
 int n = 0; //shared resource among all threads
 int numthreads = 0; //shared resource among all threads
 int threadcounter = 0;
+int numsummationsperthread = 0;
+int maxnumthreads = 0;
 pthread_mutex_t lock;
-sem_t s1;
-sem_t s2;
-//Debugging Variables:
-int* val1 = 0;
-int* val2 = 0;
-int val22 = 0;
-int val11 = 0;
 
 //Global Condition Variables:
-int maxnumthreads;
-
-//Global Prefix Sum Algorithm Variables
-int prefixsumparallelcalccomplete = 0; //Used to tell a thread when the prefix sum calculation is complete
-double numsteps = 0; //Used to keep track of the number of individual sums
-
-//Global Hillis Steele Algorithm Variable:
-int addacrossinterval = 1;
+pthread_cond_t cond1 = PTHREAD_COND_INITIALIZER;
 
 struct args_t
 {
-    int startindex;
     int endindex;
 };
 
@@ -72,66 +59,39 @@ void read_input_vector(const char* filename, int n, int* array)
 void* calculateprefixsum(void* args)
 {
 	struct args_t* structcopy = (struct args_t*) args;
-	int startindexcopy = (structcopy)->startindex;
 	int endindexcopy = (structcopy)->endindex;
+	int checkvalue = 0;
 
-	//printf("%d", endindex);
-	//Two-Phase Barrier: wait for all the threads to arrive and for all the threads to execute the critical section
-
-	//Barrier 1
-	pthread_mutex_lock(&lock);
-	threadcounter+= 1;
-
-	if(threadcounter == maxnumthreads)
+	if(endindexcopy >= 0 && endindexcopy <= (n-1))
 	{
-    	sem_wait(&s2); //The value of the semaphore decrements by 1 regardless of if the thread waits at it
-    	sem_post(&s1); //Thread 2 will post to s1, the value of the semaphore increments by 1
-	}
-
-	pthread_mutex_unlock(&lock);
-
-	sem_wait(&s1); //Thread 1 stops/waits because s1's initial value is less than or equal to 0
-	sem_post(&s1); //The thread that goes through always frees the one behind it
-
-	//Critical Section
-	if(prefixsumparallelcalccomplete == 0)
-	{
-		//Determine if the prefix sum calculation has finished by seeing if the number of steps = log2(number of numbers to sum)
-	    if(numsteps == log2(n))
+		for(int i = 0; i < log2(n); i++)
 		{
-	    	prefixsumparallelcalccomplete = 1;
-		}
-	    else if((startindexcopy + addacrossinterval) > (n - 1))
-        {
-        	//Update variables for next level of computation
-        	addacrossinterval = addacrossinterval * 2;
+			input[endindexcopy] = inputpreviouslevelcopy[endindexcopy] + inputpreviouslevelcopy[(int) (endindexcopy - (pow(2.0, i)))];
+			//checkvalue = input[endindexcopy];
+			//printf("%d", endindexcopy);
+			//printf("%d", checkvalue);
 
-        	for(int x = 0; x < n; x++)
-        	{
-        		inputpreviouslevelcopy[x] = input[x];
-        	}
-        }
-        else
-        {
-        	input[endindexcopy] = inputpreviouslevelcopy[startindexcopy] + inputpreviouslevelcopy[endindexcopy];
-        	numsteps++;
-        }
+			for(int j = 0; j < n; j++)
+			{
+				inputpreviouslevelcopy[j] = input[j];
+			}
+		}
 	}
 
-	//Barrier 2
 	pthread_mutex_lock(&lock);
-	threadcounter -= 1;
+	threadcounter+=1;
 
-	if(threadcounter == 0)
+	if(threadcounter < maxnumthreads)
 	{
-    	sem_wait(&s1); //s1's value is 1 when thread 1 goes through, so thread 2 does not wait here
-    	sem_post(&s2);
+		pthread_cond_wait(&cond1, &lock);
+	}
+	else if(threadcounter == maxnumthreads)
+	{
+		threadcounter = 0;
+		pthread_cond_broadcast(&cond1);
 	}
 
 	pthread_mutex_unlock(&lock);
-
-	sem_wait(&s2); //s2's value gets decremented to 0 by thread 1. s2's value gets decremented to 0 again by thread 2
-	sem_post(&s2); //s2's value gets incremented to 1 by thread 1. s2's value gets incremented to 1 again by thread 2
 
 	return NULL;
 }
@@ -151,8 +111,7 @@ void* printPrefixSum()
 int main(int argc, char* argv[])
 {
   char* filename;
-  int startindex = 0;
-  int endindex = addacrossinterval;
+  int endindex = 1;
 
   if(argc == 4)
   {
@@ -176,30 +135,31 @@ int main(int argc, char* argv[])
 
   //Read in the contents (integers in this case) of the first argument file in the read_input_vector function
   input = malloc(sizeof(int) * n);
+  inputpreviouslevelcopy = malloc(sizeof(int) * n);
   read_input_vector(filename, n, input);
+
   //Calculate the prefix sum using a version of the Hillis and Steele Algorithm
 
   //Initialize the mutex lock and semaphores:
   pthread_mutex_init(&lock, NULL);
-  sem_init(&s1, 0, 0);
-  sem_init(&s2, 0, 2);
 
   //Set the condition variable to the maximum number of threads:
   maxnumthreads = numthreads;
 
-  //Initialize the inputpreviouslevelcopy:
-  inputpreviouslevelcopy = malloc(sizeof(int) * n);
+  //Calculate the number of summations per thread
+  numsummationsperthread = (int) (n / maxnumthreads) + (n % maxnumthreads == 0 ? 0 : 1); //? is a tertiary operator, if (n % maxnumthreads == 0) evaluates to true, then add 0, else add 1.
 
-  for(int z = 0; z < n; z++)
+  //Initialize condition variables:
+  if(pthread_cond_init(&cond1, NULL) != 0)
   {
-	  inputpreviouslevelcopy[z] = input[z];
+      perror("pthread_cond_init() error");
+      exit(1);
   }
 
   //Create each thread using a loop:
   for(int x = 0; x < numthreads; x++)
   {
 	struct args_t *args = malloc(sizeof(struct args_t));
-	args->startindex = startindex;
 	args->endindex = endindex;
 
  	int result = pthread_create(&threadlist[x], NULL, calculateprefixsum, (void*) args); //pthread_create only takes a (void*) argument for arguments to the calculateprefixsum function.
@@ -210,8 +170,6 @@ int main(int argc, char* argv[])
  	}
 
  	free(args);
-
- 	startindex+=1;
  	endindex+=1;
   }
 
@@ -225,13 +183,17 @@ int main(int argc, char* argv[])
   pthread_mutex_destroy(&lock);
 
   //Print the Prefix Sum:
-  pthread_t thread_id;
-  pthread_create(&thread_id, NULL, printPrefixSum, NULL);
+  printPrefixSum();
 
-  //Block the calling thread until thread_id terminates. Then, the calling thread can resume execution.
-  pthread_join(thread_id, NULL);
+  //Destroy the condition variable
+  if(pthread_cond_destroy(&cond1) != 0)
+  {
+      perror("pthread_cond_destroy() error");
+      exit(2);
+  }
 
   free(inputpreviouslevelcopy);
   free(input);
   return EXIT_SUCCESS;
 }
+
